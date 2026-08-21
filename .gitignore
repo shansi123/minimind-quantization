@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# 模型权重和大文件（极其重要！）
+*.pth
+*.bin
+*.ckpt
+*.safetensors
+out/
+checkpoints/
+*.h5
+
+# 数据集
+dataset/*.json
+*.parquet
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter Notebook
+.ipynb_checkpoints/
