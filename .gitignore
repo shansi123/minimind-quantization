@@ -13,13 +13,21 @@ venv/
 *.bin
 *.ckpt
 *.safetensors
+*.onnx           # ← ONNX 模型（量化项目产生）
+*.gguf           # ← llama.cpp 格式（如果有）
 out/
 checkpoints/
-*.h5
 
-# 数据集
-dataset/*.json
+# 数据集（注意：示例数据不要全忽略，只忽略大数据集）
+dataset/*.jsonl  # ← 只忽略 jsonl（大文件），保留 json（小配置文件）
 *.parquet
+*.arrow
+
+# 生成的结果和日志
+results/*.png    # ← 如果 results/ 里只有图，可以全保留；如果有大文件再忽略
+logs/
+*.log
+wandb/
 
 # IDE
 .vscode/
@@ -29,3 +37,7 @@ dataset/*.json
 
 # Jupyter Notebook
 .ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,12 @@
+# minimind 原有依赖
+torch>=2.0.0
+transformers>=4.30.0
+sentencepiece
+protobuf
+
+# 量化项目新增依赖
+onnx>=1.14.0
+onnxruntime>=1.15.0
+numpy
+tqdm
+matplotlib  # 画图用
