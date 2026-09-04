@@ -7,3 +7,4 @@ onnxruntime>=1.15.0
 numpy
 tqdm
 matplotlib 
+torchao
