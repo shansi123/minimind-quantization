@@ -7,6 +7,7 @@ __pycache__/
 env/
 venv/
 .venv/
+minimind_gptq
 
 # 模型权重和大文件（极其重要！）
 *.pth

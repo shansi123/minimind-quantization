@@ -14,6 +14,7 @@ class MiniMindConfig(PretrainedConfig):
         self.hidden_size = hidden_size
         self.num_hidden_layers = num_hidden_layers
         self.use_moe = use_moe
+        self.use_cache = kwargs.get("use_cache", True)
         self.dropout = kwargs.get("dropout", 0.0)
         self.vocab_size = kwargs.get("vocab_size", 6400)
         self.bos_token_id = kwargs.get("bos_token_id", 1)
@@ -109,15 +110,16 @@ class Attention(nn.Module):
         self.dropout = config.dropout
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention') and config.flash_attn
 
-    def forward(self, x, position_embeddings, past_key_value=None, use_cache=False, attention_mask=None):
+    def forward(self, x, position_embeddings=None, past_key_value=None, use_cache=False, attention_mask=None):
         bsz, seq_len, _ = x.shape
         xq, xk, xv = self.q_proj(x), self.k_proj(x), self.v_proj(x)
         xq = xq.view(bsz, seq_len, self.n_local_heads, self.head_dim)  # 改形状
         xk = xk.view(bsz, seq_len, self.n_local_kv_heads, self.head_dim)  # 后面要取反
         xv = xv.view(bsz, seq_len, self.n_local_kv_heads, self.head_dim)
         xq, xk = self.q_norm(xq), self.k_norm(xk)
-        cos, sin = position_embeddings
-        xq, xk = apply_rotary_pos_emb(xq, xk, cos, sin)  # 先打上位置编码
+        if position_embeddings is not None:
+            cos, sin = position_embeddings
+            xq, xk = apply_rotary_pos_emb(xq, xk, cos, sin)  # 先打上位置编码
         if past_key_value is not None:  # 检查是否有kv缓存
             xk = torch.cat([past_key_value[0], xk], dim=1)  # 有则在把新k存入缓存中（拼接历史k）
             xv = torch.cat([past_key_value[1], xv], dim=1)  # 有则在把新v存入缓存中（拼接历史v）
@@ -179,19 +181,52 @@ class MOEFeedForward(nn.Module):
 class MiniMindBlock(nn.Module):
     def __init__(self, layer_id: int, config: MiniMindConfig):
         super().__init__()
-        self.self_attn = Attention(config)  # 自注意力机制计算
-        self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)  # 对输入进行层归一化
-        self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)  # 对输出进行层归一化
-        self.mlp = FeedForward(config) if not config.use_moe else MOEFeedForward(config)  # 是否使用混合专家模型
 
-    def forward(self, hidden_states, position_embeddings, past_key_value=None, use_cache=False, attention_mask=None):
-        residual = hidden_states  # 存储原始输入张量
+        self.layer_id = layer_id
+
+        self.self_attn = Attention(config)
+
+        self.input_layernorm = RMSNorm(
+            config.hidden_size,
+            eps=config.rms_norm_eps
+        )
+
+        self.post_attention_layernorm = RMSNorm(
+            config.hidden_size,
+            eps=config.rms_norm_eps
+        )
+
+        self.mlp = (
+            FeedForward(config)
+            if not config.use_moe
+            else MOEFeedForward(config)
+        )
+
+    def forward(
+        self,
+        hidden_states,
+        position_embeddings=None,
+        past_key_value=None,
+        use_cache=False,
+        attention_mask=None,
+        **kwargs,
+    ):
+        residual = hidden_states
+
         hidden_states, present_key_value = self.self_attn(
-            self.input_layernorm(hidden_states), position_embeddings,
-            past_key_value, use_cache, attention_mask
-        )  # 计算出残差和  返回kv cache
-        hidden_states += residual  # 残差连接
-        hidden_states = hidden_states + self.mlp(self.post_attention_layernorm(hidden_states))  # 残差连接+前馈网络或混合专家模型
+            self.input_layernorm(hidden_states),
+            position_embeddings=position_embeddings,
+            past_key_value=past_key_value,
+            use_cache=use_cache,
+            attention_mask=attention_mask,
+        )
+
+        hidden_states = hidden_states + residual
+
+        hidden_states = hidden_states + self.mlp(
+            self.post_attention_layernorm(hidden_states)
+        )
+
         return hidden_states, present_key_value
 
 class MiniMindModel(nn.Module):
@@ -209,6 +244,7 @@ class MiniMindModel(nn.Module):
         self.register_buffer("freqs_sin", freqs_sin, persistent=False)  # 登记
 
     def forward(self, input_ids, attention_mask=None, past_key_values=None, use_cache=False, **kwargs):
+        use_cache = kwargs.pop("use_cache", use_cache)
         batch_size, seq_length = input_ids.shape
         if hasattr(past_key_values, 'layers'): past_key_values = None
         past_key_values = past_key_values or [None] * len(self.layers)
@@ -239,6 +275,7 @@ class MiniMindModel(nn.Module):
 class MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
     config_class = MiniMindConfig
     _tied_weights_keys = {"lm_head.weight": "model.embed_tokens.weight"}
+    main_input_name = "input_ids"
     def __init__(self, config: MiniMindConfig = None):
         self.config = config or MiniMindConfig()
         super().__init__(self.config)
@@ -248,6 +285,11 @@ class MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
         self.post_init()
 
     def forward(self, input_ids, attention_mask=None, past_key_values=None, use_cache=False, logits_to_keep=0, labels=None, **kwargs):
+        if input_ids is None:
+            raise ValueError("input_ids 不能为空")
+
+        if use_cache is None:
+            use_cache = self.config.use_cache
         hidden_states, past_key_values, aux_loss = self.model(input_ids, attention_mask, past_key_values, use_cache, **kwargs)
         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
         logits = self.lm_head(hidden_states[:, slice_indices, :])

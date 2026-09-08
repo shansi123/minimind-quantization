@@ -19,7 +19,7 @@ from model.model_minimind import MiniMindConfig, MiniMindForCausalLM
 # 加载模型
 def load_model(args):
     # 加载分词器
-    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_path, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_path)
     # 构建模型配置
     llm_config = MiniMindConfig(
         hidden_size = args.hidden_size,
@@ -58,7 +58,7 @@ def test_model(args, model, tokenizer):
     if not args.use_auto_prompt:
         prompt = input('请输入测试提示词：')
     else:
-        prompt = "中国的首都是"
+        prompt = "你是谁"
     conversation.append({"role": "user", "content": prompt})
     inputs = tokenizer.apply_chat_template(conversation, tokenize = False,add_generation_prompt=True, open_thinking=bool(0))
     inputs = tokenizer(inputs, return_tensors="pt", truncation=True).to(args.device)
